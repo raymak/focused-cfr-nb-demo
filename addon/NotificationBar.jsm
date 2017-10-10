@@ -8,10 +8,18 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/Console.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 const log = console.log; // Temporary
 
 XPCOMUtils.defineLazyModuleGetter(this, "RecentWindow","resource:///modules/RecentWindow.jsm");
 
+const MESSAGES = [
+    'FocusedCFR::log',
+    'FocusedCFR::openUrl',
+    'FocusedCFR::dismiss',
+    'FocusedCFR::close',
+    'FocusedCFR::action'
+  ]
 
 this.EXPORTED_SYMBOLS = ["NotificationBar"];
 
@@ -30,42 +38,86 @@ function getMostRecentBrowserWindow() {
 
 
 class NotificationBar {
-  constructor(){
-        
+  constructor(recommRecipe, messageListenerCallback){
+    this.recommRecipe = recommRecipe;
+    this.messageListenerCallback = messageListenerCallback;
   }
 
   present(){
-    log('presenting doorhanger');
+    log('presenting notification bar');
     this.show(getMostRecentBrowserWindow());
   }
 
   show(win){
     let box = win.document.getElementById("focused-cfr-notificationbar-box");
 
-    if (box === null) { // create the panel
-      box = win.document.createElement("hbox");
-      box.setAttribute("id", "focused-cfr-notificationbar-box");
-      box.setAttribute("style", "height: 72px;");
+    if (box != null) { 
+      this.killNotification()
+    }
 
-      const embeddedBrowser = win.document.createElement("browser");
-      embeddedBrowser.setAttribute("id", "focused-cfr-notificationbar");
-      embeddedBrowser.setAttribute("src", "resource://focused-cfr-shield-study-content/notificationbar/notificationBar.html");
-      embeddedBrowser.setAttribute("type", "content");
-      embeddedBrowser.setAttribute("disableglobalhistory", "true");
-      embeddedBrowser.setAttribute("flex", "1");
+    box = win.document.createElement("hbox");
+    box.setAttribute("id", "focused-cfr-notificationbar-box");
+    box.setAttribute("style", "height: 72px;");
 
-      box.appendChild(embeddedBrowser);
-      let content = win.document.getElementById("appcontent");
-      content.insertBefore(box, content.childNodes[0]);
+    const embeddedBrowser = win.document.createElement("browser");
+    embeddedBrowser.setAttribute("id", "focused-cfr-notificationbar");
+    embeddedBrowser.setAttribute("src", "resource://focused-cfr-shield-study-content/notificationbar/notificationBar.html");
+    embeddedBrowser.setAttribute("type", "content");
+    embeddedBrowser.setAttribute("disableglobalhistory", "true");
+    embeddedBrowser.setAttribute("flex", "1");
 
-      // seems that messageManager only available when browser is attached
-      embeddedBrowser.messageManager.loadFrameScript(FRAME_SCRIPT, false);
-      embeddedBrowser.messageManager.addMessageListener('FocusedCFR::log', {
-        receiveMessage: function(message) {
-          log(message.data);    
-        }
-      }, true);
-      embeddedBrowser.messageManager.sendAsyncMessage('FocusedCFR::load');
-    }  
+    box.appendChild(embeddedBrowser);
+    let content = win.document.getElementById("appcontent");
+    content.insertBefore(box, content.childNodes[0]);
+
+    // seems that messageManager only available when browser is attached
+    embeddedBrowser.messageManager.loadFrameScript(FRAME_SCRIPT, false);
+
+    for (let m of MESSAGES) {
+      embeddedBrowser.messageManager.addMessageListener(m, this);
+    }
+
+    embeddedBrowser.messageManager.sendAsyncMessage('FocusedCFR::load', this.recommRecipe);
+  }
+
+  killNotification(){
+    const windowEnumerator = Services.wm.getEnumerator("navigator:browser");
+
+    log('killing notification');
+
+    while (windowEnumerator.hasMoreElements()) {
+      const win = windowEnumerator.getNext();
+      let box = win.document.getElementById("focused-cfr-notificationbar-box");
+      if (box) {
+        box.parentNode.removeChild(box);
+      }
+    }
+  }
+
+  receiveMessage(message) {
+    switch (message.name) {
+      case "FocusedCFR::log": 
+        log(message.data);
+        break;
+
+      case "FocusedCFR::dismiss":
+        this.killNotification();
+        this.messageListenerCallback(message);
+        break;
+
+      case "FocusedCFR::action":
+        this.messageListenerCallback(message);
+        break;
+
+      case "FocusedCFR::close":
+        this.killNotification();
+        this.messageListenerCallback(message);
+
+        break;
+
+      default:
+        this.messageListenerCallback(message);
+
+    }
   }
 }

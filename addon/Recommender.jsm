@@ -15,6 +15,11 @@ XPCOMUtils.defineLazyModuleGetter(this, "Storage", "resource://focused-cfr-shiel
 XPCOMUtils.defineLazyModuleGetter(this, "Doorhanger", "resource://focused-cfr-shield-study/Doorhanger.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NotificationBar", "resource://focused-cfr-shield-study/NotificationBar.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Preferences", "resource://gre/modules/Preferences.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Bookmarks", "resource://gre/modules/Bookmarks.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "RecentWindow","resource:///modules/RecentWindow.jsm");
+
+let bmsvc = Cc["@mozilla.org/browser/nav-bookmarks-service;1"]
+                      .getService(Components.interfaces.nsINavBookmarksService);
 
 const AMAZON_AFFILIATIONS = [
                               "www.amazon.com",
@@ -31,11 +36,76 @@ const MAX_NUMBER_OF_NOTIFICATIONS = 3;
 
 const NOTIFICATION_GAP_PREF = "extensions.focused_cfr_study.notification_gap_minutes";
 const MAX_NUMBER_OF_NOTIFICATIONS_PREF = "extensions.focused_cfr_study.max_number_of_notifications";
-const INIT_PREF = "extensions.focused_cfr_study.initialized"
+const INIT_PREF = "extensions.focused_cfr_study.initialized";
+const POCKET_BOOKMARK_COUNT_PREF = "extensions.focused_cfr_study.pocket_bookmark_count_threshold";
+
+const POCKET_BOOKMARK_COUNT_TRHESHOLD = 15;
+
+const AMAZON_LINK = "www.amazon.com/gp/BIT/ref=bit_v2_BDFF1?tagbase=mozilla1";
 
 this.EXPORTED_SYMBOLS = ["Recommender"];
 
 const log = console.log; // Temporary
+
+let bookmarkObserver;
+
+const recipes = {
+  "amazon-assistant": {
+    message: {
+      text: `Instant product matches while you shop across the web with Amazon Assistant`,
+      link: {
+        text: 'Amazon Assistant',
+        url: `${AMAZON_LINK}`
+      }
+    },
+    primaryButton: {
+      label: `Add to Firefox`,
+      url: `${AMAZON_LINK}`
+    },
+    icon: {
+      url: "resource://focused-cfr-shield-study-content/images/amazon-assistant.png",
+      alt: "Amazon Assistant logo"
+    }
+  },
+  "mobile-promo": {
+    message: {
+      text:`Your Firefox account meets your phone. They fall in love. Get Firefox on your phone now.`,
+      link: {}
+    },
+    primaryButton: {
+      label: 'Make a match',
+      url: `https://www.mozilla.org/en-US/firefox/mobile-download/desktop/`
+    },
+    icon: {
+      url: "resource://focused-cfr-shield-study-content/images/mobile-promo.png",
+      alt: "Firefox Mobile logo"
+    }
+  },
+  "pocket": {
+    message: {
+      text: "You might like Pocket, which lets you save for later articles, videos, or pretty much anything!",
+      link: {
+        text: "Pocket",
+        url: "https://getpocket.com/firefox/"
+      }
+    },
+    primaryButton: {
+      label: "Try it Now",
+      url: "http://www.getpocket.com/firefox_tryitnow"
+    },
+    icon: {
+      url: "resource://focused-cfr-shield-study-content/images/pocket.png",
+      alt: "Pocket Logo"
+    }
+  }
+}
+
+function getMostRecentBrowserWindow() {
+  return RecentWindow.getMostRecentBrowserWindow({
+    private: false,
+    allowPopups: false,
+  });
+}
 
 class Recommender {
   constructor() {
@@ -44,17 +114,22 @@ class Recommender {
   }
 
   test() {
-    (new NotificationBar()).present();
+    (new NotificationBar(recipes['amazon-assistant'], this.presentationMessageListener.bind(this))).present();
+
+
   }
 
   async start() {
     if (Preferences.get(INIT_PREF)) return; // not first run
 
-    await this.firstRun();
+    let isFirstRun = !(await Storage.has("general"));
+    if (isFirstRun)
+      await this.firstRun();
 
     Utils.printStorage();
-    this.listenForMobilePromoTrigger();
-    this.listenForPageViews();
+    await this.listenForMobilePromoTrigger();
+    await this.listenForPageViews();
+    await this.listenForBookmarks();
   }
 
   async firstRun() {
@@ -71,6 +146,7 @@ class Recommender {
 
     Preferences.set(NOTIFICATION_GAP_PREF, NOTIFICATION_GAP_MINUTES);
     Preferences.set(MAX_NUMBER_OF_NOTIFICATIONS_PREF, MAX_NUMBER_OF_NOTIFICATIONS);
+    Preferences.set(POCKET_BOOKMARK_COUNT_PREF, POCKET_BOOKMARK_COUNT_TRHESHOLD);
     Preferences.set(INIT_PREF, true);
   }
 
@@ -95,10 +171,19 @@ class Recommender {
       }
     }
 
+    const pocket = {
+      id: "pocket",
+      status: "waiting",
+      presentation: {
+        count: 0
+      }
+    }
+
     const recomms = {ids: ["mobile-promo", "amazon-assistant", "pocket"]};
     await Storage.set("recomms", recomms);
     await Storage.set("recomms.mobile-promo", mobilePromo);
     await Storage.set("recomms.amazon-assistant", amazonAssistant);
+    await Storage.set("recomms.pocket", pocket);
   }
 
   async checkForAmazonVisit(hostname) {
@@ -121,6 +206,41 @@ class Recommender {
     await Storage.update("recomms.amazon-assistant", data);
 
     await this.presentRecommendation('amazon-assistant');
+  }
+
+  async listenForBookmarks(){
+
+    let that = this;
+    async function checkThreshold(){
+      let bookmarkCount = (await Bookmarks.getRecent(100)).length;
+      log(`bookmark count: ${bookmarkCount}`);
+      let threshold = Preferences.get(POCKET_BOOKMARK_COUNT_PREF);
+      if (bookmarkCount > threshold){
+        that.queueRecommendation('pocket');
+      }
+    }
+
+    await checkThreshold();
+
+    bookmarkObserver = {
+      onItemAdded: (aItemId, aParentId, aIndex, aItemType, aURI, aTitle,
+                    aDateAdded, aGuid, aParentGuid) => {
+        console.log('bookmark added');
+
+        checkThreshold().then(()=>this.presentRecommendation('pocket'));
+      },
+      onItemRemoved() {},
+
+      QueryInterface: XPCOMUtils.generateQI(Ci.nsINavBookmarkObserver),
+
+      onBeginUpdateBatch() {},
+      onEndUpdateBatch() {},
+      onItemChanged() {},
+      onItemVisited() {},
+      onItemMoved() {},
+    };
+
+    bmsvc.addObserver(bookmarkObserver, false);
   }
 
   listenForPageViews() {
@@ -165,6 +285,7 @@ class Recommender {
       window.gBrowser.addProgressListener(progressListener);
     }
 
+
     // new windows
     const windowListener = {
       onWindowTitleChange() { },
@@ -198,10 +319,6 @@ class Recommender {
       onCloseWindow() { },
     };
     Services.wm.addListener(windowListener);
-  }
-
-  listenForBookmarks() {
-
   }
 
   async listenForMobilePromoTrigger() {
@@ -261,10 +378,35 @@ class Recommender {
 
     // present
 
+    let notificationBar = new NotificationBar(recommRecipe, this.presentationMessageListener.bind(this));
+
     recomm.status == "presented";
     recomm.presentation.count += 1;
 
     await Storage.update(`recomms.${id}`, recomm);
+  }
+
+  presentationMessageListener(message){
+    log('message received from presentation');
+
+    switch (message.name){
+      case "FocusedCFR::openUrl":
+        getMostRecentBrowserWindow().gBrowser.loadOneTab(message.data, {
+          inBackground: false,
+        });
+        break;
+      case "FocusedCFR::dismiss":
+
+        break;
+
+      case "FocusedCFR::action":
+
+        break;
+
+      case "FocusedCFR::close":
+
+        break;
+    }
   }
 }
 

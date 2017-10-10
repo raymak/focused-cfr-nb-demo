@@ -2,24 +2,67 @@
 
 let window;
 let document;
+let recipe;
 
 addMessageListener('FocusedCFR::load', {
-  receiveMessage: function(message){
+  receiveMessage: function(message) {
     window = content;
     document = content.document;
+
+    let data = message.data;
+    recipe = {
+      notificationBar: {
+        icon: data.icon,
+        message: data.message,
+        primaryButton: {
+          label: data.primaryButton.label,
+          color: '', // e.g. '#53bf28'
+          icon: {
+            url: '' // e.g. 'plus-sign.svg'
+          },
+          url: data.primaryButton.url
+        },
+        secondaryButton: {
+          label: 'Not Now',
+          dropdownOptions: [
+            {
+              id: 'dont-show',
+              label: "Don't show me this again" 
+            }
+          ]
+        },
+        starRating: {
+          url: '', // e.g. 'fourStars.png'
+          // specify where in notificationBar this element should be included
+          location: '' // acceptable values: 'left', 'middle', 'right'
+        },
+        link: {
+          text: '', // e.g. 'Learn More' or '361 reviews'
+          url: '', // e.g. 'https://addons.mozilla.org/en-US/firefox/addon/amazon-browser-bar/' or 'https://addons.mozilla.org/en-US/firefox/addon/amazon-browser-bar/reviews/'
+          location: '' // acceptable values: 'middle', 'right'
+        },
+        checkbox: {
+          label: '' // e.g. "Don't ask me again"
+        },
+        additionalInfo: {
+          text: '' // e.g. '408,835 users' or '361 reviews'
+        }
+      }
+    }
     notificationBar.init();
   }
 });
+
 sendAsyncMessage('FocusedCFR::log', 'frame script loaded');
 
-const recipe = {
+/**const recipe = {
   
   notificationBar: {
     // DEFAULT ELEMENTS:
     // to remove from UI, replace string value with ''.
     icon: {
       // Firefox Add-on logo: https://addons.cdn.mozilla.net/static/img/addon-icons/default-32.png
-      url: 'https://mobileapkworld.com/wp-content/uploads/2017/05/com.amazon.aa.png',
+      url: 'resource://focused-cfr-shield-study-content/images/amazon-assistant.png',
       alt: 'Amazon Assistant logo'
     },
     message: {
@@ -65,7 +108,7 @@ const recipe = {
       text: '' // e.g. '408,835 users' or '361 reviews'
     }
   }
-};
+};  **/ 
 
 const notificationBar = {
 
@@ -74,7 +117,7 @@ const notificationBar = {
   },
 
   addListeners() {
-    content.addEventListener('load', () => {
+    window.addEventListener('load', () => {
       this.createNotificationBar();
       this.closeIconEle.addEventListener('click', () => {
         this.closeNotificationBar();
@@ -82,7 +125,34 @@ const notificationBar = {
       this.secondaryButtonShowDropdownEle.addEventListener('click', () => {
         this.toggleDropdownMenu();
       });
+
+      // primary button
+      this.primaryButtonEle.classList.add('external-link');
+      this.primaryButtonEle.dataset.url = recipe.notificationBar.primaryButton.url;
+      this.registerExternalLinks();
+      this.primaryButtonEle.addEventListener('click', ()=>{
+        sendAsyncMessage('FocusedCFR::action');
+      });
+
+      // secondary button
+      this.secondaryButtonEle.addEventListener('click', ()=>{
+        sendAsyncMessage('FocusedCFR::dismiss');
+      });
+
+      // close button
+      this.closeIconEle.addEventListener('click', ()=>{
+        sendAsyncMessage('FocusedCFR::close');
+      });
     });
+  },
+
+  registerExternalLinks(){
+    for (let ele of document.getElementsByClassName('external-link')){
+      ele.addEventListener('click', (e)=>{
+        sendAsyncMessage('FocusedCFR::openUrl', ele.dataset.url);
+        e.preventDefault();
+      });
+    }
   },
 
   createNotificationBar() {
@@ -229,7 +299,7 @@ const notificationBar = {
   addMessageContent() {
     if (recipe.notificationBar.message.link.text) {
       const messageParts = recipe.notificationBar.message.text.split(recipe.notificationBar.message.link.text);
-      this.messageEle.innerHTML = `${messageParts[0]} <a href="${recipe.notificationBar.message.link.url}">${recipe.notificationBar.message.link.text}</a> ${messageParts[1]}`;
+      this.messageEle.innerHTML = `${messageParts[0]} <a class='external-link' data-url="${recipe.notificationBar.message.link.url}" href="${recipe.notificationBar.message.link.url}">${recipe.notificationBar.message.link.text}</a> ${messageParts[1]}`;
     } else {
       this.messageEle.textContent = recipe.notificationBar.message.text;
     }
