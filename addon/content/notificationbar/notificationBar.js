@@ -23,12 +23,8 @@ addMessageListener('FocusedCFR::load', {
           url: data.primaryButton.url
         },
         secondaryButton: {
-          label: 'Not Now',
+          label: '',
           dropdownOptions: [
-            {
-              id: 'dont-show',
-              label: "Don't show me this again" 
-            }
           ]
         },
         starRating: {
@@ -42,7 +38,7 @@ addMessageListener('FocusedCFR::load', {
           location: '' // acceptable values: 'middle', 'right'
         },
         checkbox: {
-          label: '' // e.g. "Don't ask me again"
+          label: "Don't show me this again", // e.g. "Don't ask me again"
         },
         additionalInfo: {
           text: '' // e.g. '408,835 users' or '361 reviews'
@@ -143,6 +139,10 @@ const notificationBar = {
       this.closeIconEle.addEventListener('click', ()=>{
         sendAsyncMessage('FocusedCFR::close');
       });
+
+      this.fakeCheckboxEle.addEventListener('click', () => {
+        this.toggleCheckbox();
+      });
     });
   },
 
@@ -180,7 +180,8 @@ const notificationBar = {
     this.secondaryButtonEle = document.getElementById('secondary-button');
     this.secondaryButtonShowDropdownEle = document.getElementById('secondary-button-show-dropdown');
     this.dropdownMenuEle = document.getElementById('dropdown-menu');
-    this.checkboxEle = document.getElementById('checkbox');
+    this.realCheckboxEle = document.getElementById('real-checkbox');
+    this.fakeCheckboxEle = document.getElementById('fake-checkbox');
     this.ratingRightEle = document.getElementById('rating-right');
     this.additionalInfoEle = document.getElementById('additional-info');
     this.checkboxLabelEle = document.getElementById('checkbox-label');
@@ -266,15 +267,17 @@ const notificationBar = {
       this.linkMiddleEle.style.display = 'none';
       this.linkRightEle.style.display = 'none';
     }
-    if (recipe.notificationBar.secondaryButton.dropdownOptions) {
+    if (recipe.notificationBar.secondaryButton.dropdownOptions === []) {
       this.addDropdownMenuContent();
     } else {
+      this.secondaryButtonShowDropdownEle.style.display = 'none';
       this.dropdownMenuEle.style.display = 'none';
     }
     if (recipe.notificationBar.checkbox.label) {
       this.addCheckboxContent();
     } else {
-      this.checkboxEle.style.display = 'none';
+      this.realCheckboxEle.style.display = 'none';
+      this.fakeCheckboxEle.style.display = 'none';
       this.checkboxLabelEle.style.display = 'none';
     }
   },
@@ -328,6 +331,18 @@ const notificationBar = {
 
   addCheckboxContent() {
     this.checkboxLabelEle.textContent = recipe.notificationBar.checkbox.label;
+    const labelText = this.checkboxLabelEle.textContent;
+    this.realCheckboxEle.setAttribute('aria-label', labelText);
+  },
+
+  toggleCheckbox() {
+    if (this.realCheckboxEle.checked == false) {
+      this.realCheckboxEle.checked = true;
+      this.fakeCheckboxEle.style.backgroundColor = "#0187fe";
+    } else {
+      this.realCheckboxEle.checked = false;
+      this.fakeCheckboxEle.style.backgroundColor = "white";
+    }
   },
 
   addLinkRightContent() {

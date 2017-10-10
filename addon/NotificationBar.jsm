@@ -57,7 +57,7 @@ class NotificationBar {
 
     box = win.document.createElement("hbox");
     box.setAttribute("id", "focused-cfr-notificationbar-box");
-    box.setAttribute("style", "height: 72px;");
+    box.setAttribute("style", "height: 76px;");
 
     const embeddedBrowser = win.document.createElement("browser");
     embeddedBrowser.setAttribute("id", "focused-cfr-notificationbar");
